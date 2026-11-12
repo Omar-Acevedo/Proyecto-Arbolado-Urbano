@@ -187,3 +187,165 @@ def demostrar_recorridos(abb_especie, avl_diametro, abb_id, avl_id):
     print(f"  ABB por ID       -> Nodos: {abb_id.total_nodos:<6} | Registros: {abb_id.total_registros:<6} | Altura h = {h_abb_id:<5} | Invariante: {ok_abb_id}")
     print(f"  AVL por ID       -> Nodos: {avl_id.total_nodos:<6} | Registros: {avl_id.total_registros:<6} | Altura h = {h_avl_id:<5} | Invariante: {ok_avl_id} (Rotaciones: {avl_id.rotaciones_realizadas})")
     print(f"  AVL por Diámetro -> Nodos: {avl_diametro.total_nodos:<6} | Registros: {avl_diametro.total_registros:<6} | Altura h = {h_avl_diam:<5} | Invariante: {ok_avl_diam} (Rotaciones: {avl_diametro.rotaciones_realizadas})")
+
+
+def main():
+    ruta_csv = 'export.csv'
+    print(f"Filtrando {LIMITE_ESPECIES} especies y hasta {ARBOLES_POR_ESPECIE} árboles por especie desde '{ruta_csv}'...")
+    try:
+        datos, resumen_especies = cargar_datos_csv(ruta_csv)
+    except FileNotFoundError:
+        print(f"[Error] No se encontró el archivo '{ruta_csv}' en el directorio actual.")
+        return
+
+    print(f"\n Subconjunto cargado exitosamente: {len(datos)} árboles en {len(resumen_especies)} especies:")
+    for i, (esp, cant) in enumerate(resumen_especies.items(), 1):
+        print(f"   {i:>2}. {esp:<32}: {cant} árboles")
+
+    abb_id = ABB()
+    abb_especie = ABB()
+    avl_id = AVL()
+    avl_diametro = AVL()
+
+    print("\nConstruyendo estructuras...")
+    t0 = time.perf_counter()
+    for reg in datos:
+        tree_insert(abb_especie, reg['especie'], reg)
+        tree_insert(abb_id, reg['tree_id'], reg)
+    t1 = time.perf_counter()
+
+    t2 = time.perf_counter()
+    for reg in datos:
+        avl_insert(avl_id, reg['tree_id'], reg)
+        avl_insert(avl_diametro, reg['diametro'], reg)
+    t3 = time.perf_counter()
+
+    print(f"  -> ABB construido en {t1 - t0:.4f} s")
+    print(f"  -> AVL construido en {t3 - t2:.4f} s")
+
+    while True:
+        print("\n" + "=" * 72)
+        print(" SISTEMA DE GESTIÓN DEL ARBOLADO URBANO (10 ESPECIES / 8,000 POR ESPECIE)")
+        print("=" * 72)
+        print(" 1. Menú de las 10 especies en orden alfabético y consulta")
+        print(" 2. Localizar un árbol por tree_id ")
+        print(" 3. Dar de baja un árbol por tree_id conservando el orden")
+        print(" 4. Recuperar árboles por rango de diámetro [a, b] en pulgadas")
+        print(" 5. Árbol de menor y mayor diámetro, y sucesor inmediato")
+        print(" 6. Demostración de los 3 recorridos (Preorden, Inorden, Postorden) y Alturas")
+        print(" 0. Salir")
+        opcion = input("\nElige una opción: ").strip()
+
+        if opcion == '1':
+            submenu_especies(abb_especie)
+
+        elif opcion == '2':
+            entrada = input("Ingresa el tree_id a buscar: ").strip()
+            if not entrada.isdigit():
+                print("  [!] El ID debe ser un número entero.")
+                continue
+            tid = int(entrada)
+
+            t_a0 = time.perf_counter()
+            nodo_abb = iterative_tree_search(abb_id.root, tid)
+            t_a1 = time.perf_counter()
+
+            t_v0 = time.perf_counter()
+            nodo_avl = iterative_tree_search(avl_id.root, tid)
+            t_v1 = time.perf_counter()
+
+            if nodo_abb is None:
+                print(f"  [!] El tree_id {tid} no está dentro del subconjunto de 10 especies.")
+            else:
+                mostrar_tabla_arboles(nodo_abb.registros, limite=1)
+                print(f"\n  Tiempo en ABB : {(t_a1 - t_a0)*1e6:.2f} µs")
+                print(f"  Tiempo en AVL : {(t_v1 - t_v0)*1e6:.2f} µs (Altura del nodo en AVL: h={nodo_avl.h}, fb={factor_balance(nodo_avl)})")
+
+        elif opcion == '3':
+            entrada = input("Ingresa el tree_id del árbol a dar de baja: ").strip()
+            if not entrada.isdigit():
+                print("  [!] El ID debe ser un número entero.")
+                continue
+            tid = int(entrada)
+
+            nodo_id_abb = iterative_tree_search(abb_id.root, tid)
+            if nodo_id_abb is None:
+                print(f"  [!] No existe el árbol con ID {tid} en el subconjunto.")
+                continue
+
+            reg_baja = nodo_id_abb.registros[0]
+            esp_baja = reg_baja['especie']
+            diam_baja = reg_baja['diametro']
+
+            # Baja en ABB (ID y Especie)
+            tree_delete(abb_id, nodo_id_abb, tree_id=tid)
+            nodo_esp = iterative_tree_search(abb_especie.root, esp_baja)
+            tree_delete(abb_especie, nodo_esp, tree_id=tid)
+
+            # Baja en AVL (ID y Diámetro)
+            nodo_id_avl = iterative_tree_search(avl_id.root, tid)
+            avl_delete(avl_id, nodo_id_avl, tree_id=tid)
+            nodo_diam_avl = iterative_tree_search(avl_diametro.root, diam_baja)
+            avl_delete(avl_diametro, nodo_diam_avl, tree_id=tid)
+
+            print(f"  [OK] Árbol ID {tid} ('{esp_baja}', {diam_baja} in) eliminado correctamente.")
+            print(f"       Total de árboles activos restantes: {abb_id.total_registros}")
+
+        elif opcion == '4':
+            try:
+                min_d = float(input("Diámetro mínimo (pulgadas): ").strip())
+                max_d = float(input("Diámetro máximo (pulgadas): ").strip())
+            except ValueError:
+                print("  [!] Ingresa valores numéricos válidos.")
+                continue
+
+            t0 = time.perf_counter()
+            en_rango = []
+            buscar_rango_avl(avl_diametro.root, min_d, max_d, en_rango)
+            t1 = time.perf_counter()
+
+            print(f"\n>>> Se recuperaron {len(en_rango)} árboles en el rango [{min_d}, {max_d}] in ({(t1 - t0)*1e3:.2f} ms):")
+            mostrar_tabla_arboles(en_rango, limite=15)
+
+        elif opcion == '5':
+            nodo_min = tree_minimum(avl_diametro.root)
+            nodo_max = tree_maximum(avl_diametro.root)
+            if nodo_min is None or nodo_max is None:
+                print("  [!] El AVL está vacío.")
+                continue
+
+            print(f"\n>>> MENOR DIÁMETRO ({nodo_min.key} in) -> {len(nodo_min.registros)} ejemplar(es):")
+            mostrar_tabla_arboles(nodo_min.registros, limite=3)
+
+            print(f"\n>>> MAYOR DIÁMETRO ({nodo_max.key} in) -> {len(nodo_max.registros)} ejemplar(es):")
+            mostrar_tabla_arboles(nodo_max.registros, limite=3)
+
+            entrada = input("\nIngresa un diámetro en pulgadas para obtener su SUCESOR inmediato: ").strip()
+            try:
+                d_val = float(entrada)
+            except ValueError:
+                continue
+
+            nodo_actual = iterative_tree_search(avl_diametro.root, d_val)
+            if nodo_actual is None:
+                print(f"  [!] No existe ningún árbol con diámetro exacto de {d_val} in.")
+            else:
+                suc = tree_successor(nodo_actual)
+                if suc is None:
+                    print(f"  [!] El diámetro {d_val} in es el máximo del árbol; no tiene sucesor.")
+                else:
+                    print(f"\n>>> SUCESOR INMEDIATO de {d_val} in es {suc.key} in ({len(suc.registros)} ejemplares):")
+                    mostrar_tabla_arboles(suc.registros, limite=5)
+
+        elif opcion == '6':
+            demostrar_recorridos(abb_especie, avl_diametro, abb_id, avl_id)
+
+        elif opcion == '0':
+            print("Saliendo del programa...")
+            break
+        else:
+            print("  [!] Opción no válida.")
+
+
+if __name__ == "__main__":
+    main()
